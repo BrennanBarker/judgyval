@@ -1,0 +1,20 @@
+[project]
+name = "judgyval"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Brennan Barker", email = "19918186+BrennanBarker@users.noreply.github.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "mlflow>=3.16.1",
+    "pydantic>=2.13.5",
+]
+
+[project.scripts]
+judgyval = "judgyval:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"
