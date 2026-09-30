@@ -48,7 +48,32 @@ Give the mutator the exact type, span, and subtlety:
 - **One prompt template per type,** with a definition, 2–3 examples, and a **"what doesn't count"** list (e.g. "3" → "three" isn't a quantity error, and neither is "approximately 40%" → "about 40%").
 - **Allow a `NOT_APPLICABLE` answer** so the model can decline instead of forcing a bad mutation. Track decline rates per type; a high rate means Stage 1 is too loose for that type.
 - **Hybrid rule + LLM for mechanical types.** Rules pick the target and replacement (e.g. another date that appears in the source). The LLM only makes the sentence fluent. You get tight control without FactCC-style unnatural text.
-- **Output:** the edited text, a `mutation_description` that names the specific claim affected, and the metadata fields in the [schema](01-overview.md#dataset-schema).
+- **Output:** a list of search/replace edits (not the whole rewritten document), a `mutation_description` that names the specific claim affected, and the metadata fields in the [schema](01-overview.md#dataset-schema). See [Edit format](#edit-format).
+
+### Stage 3b: Neutral rewrite from the same regions
+In a **separate call to the same mutator model**, pass the *original* text of the regions the mutation changed (taken from the applied hunks, not from the model's own account) and ask for meaning-preserving edits to those regions. Doing this in a separate call keeps the mutation out of the context, so the rewrite is less likely to carry part of the error. Passing the original spans explicitly avoids the misreading "rephrase the *mutated* regions," which would produce a second mutation labeled `True`.
+
+Then check edit shape: the control's hunks should cover roughly the same regions, and be roughly the same size, as the mutation's.
+
+## Edit format
+
+Mutators return edits, not full documents (`judgyval.models.Edit`, applied with `judgyval.edits.apply_edits`):
+
+```python
+class Edit(BaseModel):
+    original: str      # verbatim, with enough context to appear exactly once
+    replacement: str
+```
+
+**Why:** models drift when they reproduce long text. They fix typos, normalize punctuation, drop sentences, or truncate. Each unplanned change is an edit that `mutation_description` doesn't mention, which adds label noise and makes mutations and controls differ in edit shape. Edits leave every untargeted character unchanged. They also handle changes in several places (one logical error across several locations, such as a consistent rename, is still one error) and use far fewer output tokens on long sources.
+
+**Strict checks:** every `original` must appear exactly once, edits can't overlap, and no-op edits are rejected. Failures raise `EditError` with a message written for the model (e.g. "appears 3 times; include more surrounding context"). Retry once with that message. With `lenient=True`, an `original` that doesn't match exactly is retried after normalizing quotes, dashes, and whitespace; the match is mapped back to offsets in the real text.
+
+**The applied hunks are the ground truth for what changed.** Use them to reject edits outside the assigned site, to record edit location and size for shape comparisons, and to supply the original regions for Stage 3b.
+
+**Most generations don't need free-form anchoring.** Stages 1–2 already pick the span, so the prompt can give it to the model directly. Free-form edits are needed mainly when a change must also touch other places.
+
+**Measure in the pilot:** `EditError` rates per mutator model. Cheaper models misquote anchors more often.
 
 ### Stage 4: Validate, including the type
 See [01 § 1a](01-overview.md#1a-validate-variants). In addition to "is this an error?", ask a classifier "which type is it?" Type drift is common (you ask for a causal error and get a predicate error). Relabel or discard, but never keep a row with the wrong type.
